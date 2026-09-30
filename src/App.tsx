@@ -1,24 +1,24 @@
 import {
-  Activity,
   AlertTriangle,
   BarChart3,
   CheckCircle2,
-  Cloud,
-  Droplets,
-  FlaskConical,
   Gauge,
   History,
-  Leaf,
-  Lightbulb,
   Moon,
   RefreshCw,
   Sun,
-  Thermometer,
-  Zap,
   Download,
   Search,
+  Database,
+  LogOut,
+  Radio,
+  ArrowRight,
+  LockKeyhole,
+  Mail,
+  ShieldCheck,
+  BrainCircuit,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import {
   CartesianGrid,
@@ -31,20 +31,37 @@ import {
   YAxis,
 } from "recharts";
 import "./App.css";
-import type { Analisis } from "./Models/Analisis";
+import type { Analisis, InterpretacionIa } from "./Models/Analisis";
 import type { Lectura } from "./Models/Lectura";
 import {
+  ORIGEN_API,
   obtenerEstadoApi,
+  obtenerInterpretacionIa,
   obtenerLecturas,
   obtenerUltimoAnalisis,
 } from "./Services/LecturaService";
+import spinner from "./assets/arbolSpinner.svg";
 
 type Vista = "dashboard" | "analisis" | "historial";
 
+const USUARIO_DEMO = "admin@tlalcani.mx";
+const CLAVE_DEMO = "admin123";
+
+const iconosVariables: Record<string, string> = {
+  ph: "/iconos/ph.png",
+  conductividad: "/iconos/conductividad.png",
+  ce: "/iconos/conductividad.png",
+  humedad: "/iconos/humedad.png",
+  orp: "/iconos/orp.png",
+  temperatura: "/iconos/temperatura.png",
+};
+
+
 const encabezados: Record<Vista, { titulo: string; descripcion: string }> = {
   dashboard: {
-    titulo: "Monitoreo del suelo",
-    descripcion: "Resumen de las lecturas recibidas desde la aplicación móvil",
+    titulo: "Centro de monitoreo",
+    descripcion:
+      "Supervisión técnica de campos, sensores y variables del suelo",
   },
   analisis: {
     titulo: "Análisis del suelo",
@@ -57,9 +74,19 @@ const encabezados: Record<Vista, { titulo: string; descripcion: string }> = {
 };
 
 export default function App() {
+  const [sesionActiva, setSesionActiva] = useState(
+    () => sessionStorage.getItem("tlalcani_sesion") === "activa",
+  );
+  const [usuario, setUsuario] = useState(USUARIO_DEMO);
+  const [clave, setClave] = useState("");
+  const [errorLogin, setErrorLogin] = useState("");
   const [vista, setVista] = useState<Vista>("dashboard");
   const [lecturas, setLecturas] = useState<Lectura[]>([]);
   const [ultimoAnalisis, setUltimoAnalisis] = useState<Analisis | null>(null);
+  const [interpretacionIa, setInterpretacionIa] =
+    useState<InterpretacionIa | null>(null);
+
+  const [cargandoInterpretacion, setCargandoInterpretacion] = useState(false);
   const [apiDisponible, setApiDisponible] = useState(false);
   const [cargando, setCargando] = useState(true);
   const [oscuro, setOscuro] = useState(
@@ -72,6 +99,8 @@ export default function App() {
 
   const cargarDatos = useCallback(async () => {
     try {
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+
       const [disponible, datos, analisis] = await Promise.all([
         obtenerEstadoApi(),
         obtenerLecturas(),
@@ -89,6 +118,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!sesionActiva) {
+      return;
+    }
+
     const cargaInicial = window.setTimeout(() => {
       void cargarDatos();
     }, 0);
@@ -101,7 +134,41 @@ export default function App() {
       window.clearTimeout(cargaInicial);
       window.clearInterval(intervalo);
     };
-  }, [cargarDatos]);
+  }, [cargarDatos, sesionActiva]);
+
+  const analisisIdActual = ultimoAnalisis?.analisis_id;
+
+  useEffect(() => {
+    if (vista !== "analisis" || !analisisIdActual) {
+      return;
+    }
+
+    let cancelado = false;
+
+    setInterpretacionIa(null);
+    setCargandoInterpretacion(true);
+
+    obtenerInterpretacionIa(analisisIdActual)
+      .then((resultado) => {
+        if (!cancelado) {
+          setInterpretacionIa(resultado);
+        }
+      })
+      .catch(() => {
+        if (!cancelado) {
+          setInterpretacionIa(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelado) {
+          setCargandoInterpretacion(false);
+        }
+      });
+
+    return () => {
+      cancelado = true;
+    };
+  }, [vista, analisisIdActual]);
 
   useEffect(() => {
     document.documentElement.dataset.tema = oscuro ? "oscuro" : "claro";
@@ -110,6 +177,21 @@ export default function App() {
 
   const ultima = lecturas[0];
   const encabezado = encabezados[vista];
+
+  const puntajeSuelo = Math.max(
+    0,
+    Math.min(ultimoAnalisis?.puntaje_general ?? 0, 100),
+  );
+
+  const estadoIndice =
+    ultimoAnalisis?.estado_general ?? ultima?.estado ?? "optimo";
+
+  const imagenIndice =
+    estadoIndice === "critico"
+      ? "/iconos/indice-critico.png"
+      : estadoIndice === "advertencia"
+        ? "/iconos/indice-advertencia.png"
+        : "/iconos/indice-optimo.png";
 
   const datosGrafica = [...lecturas].reverse().map((lectura) => ({
     ...lectura,
@@ -125,6 +207,9 @@ export default function App() {
     const contenidoLectura = [
       lectura.lecturaId,
       lectura.dispositivoId,
+      lectura.campoId,
+      lectura.campoNombre,
+      lectura.zona,
       lectura.cultivo,
       lectura.ph,
       lectura.humedad,
@@ -166,10 +251,35 @@ export default function App() {
     return "Crítico";
   }
 
+  function iniciarSesion(evento: FormEvent<HTMLFormElement>) {
+    evento.preventDefault();
+
+    if (usuario.trim().toLowerCase() !== USUARIO_DEMO || clave !== CLAVE_DEMO) {
+      setErrorLogin("El correo o la contraseña no son correctos.");
+      return;
+    }
+
+    sessionStorage.setItem("tlalcani_sesion", "activa");
+    setErrorLogin("");
+    setCargando(true);
+    setSesionActiva(true);
+  }
+
+  function cerrarSesion() {
+    sessionStorage.removeItem("tlalcani_sesion");
+    setClave("");
+    setVista("dashboard");
+    setSesionActiva(false);
+  }
+
   function exportarCsv() {
     const encabezadosCsv = [
-      "Fecha",
+      "Fecha de captura",
+      "Fecha de recepción",
       "Lectura",
+      "Campo",
+      "Identificador del campo",
+      "Zona",
       "Dispositivo",
       "Cultivo",
       "pH",
@@ -181,8 +291,12 @@ export default function App() {
     ];
 
     const filas = lecturasFiltradas.map((lectura) => [
+      formatearFecha(lectura.fechaCaptura),
       formatearFecha(lectura.fechaRecepcion),
       lectura.lecturaId,
+      lectura.campoNombre,
+      lectura.campoId,
+      lectura.zona || "Zona no identificada",
       lectura.dispositivoId,
       lectura.cultivo,
       lectura.ph,
@@ -218,17 +332,107 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
+  if (!sesionActiva) {
+    return (
+      <div className="loginPagina">
+        <div className="particulasLogin" aria-hidden="true">
+          {Array.from({ length: 12 }).map((_, indice) => (
+            <img key={indice} src="/semilla.png" alt="" draggable={false} />
+          ))}
+        </div>
+
+        <section className="loginAcceso">
+          <form className="loginFormulario" onSubmit={iniciarSesion}>
+            <div className="loginEstado">
+              <span />
+              Sistema de monitoreo activo
+            </div>
+
+            <div className="loginFormularioEncabezado">
+              <div className="loginLogo">
+                <img src="/tlalcani-logo.png" alt="TLALCANI" />
+              </div>
+
+              <strong className="loginNombre">TLALCANI</strong>
+
+              <span className="loginDescripcion">
+                Inteligencia aplicada al suelo
+              </span>
+
+              <h1>Bienvenido</h1>
+
+              <p>
+                Supervisa tus campos, mediante sensores y análisis desde un solo
+                lugar.
+              </p>
+            </div>
+
+            <div className="separadorLogin">
+              <span />
+              <strong>Acceso al sistema</strong>
+              <span />
+            </div>
+
+            <label>
+              Correo electrónico
+              <div className="campoLogin">
+                <Mail size={19} />
+
+                <input
+                  type="email"
+                  value={usuario}
+                  onChange={(evento) => setUsuario(evento.target.value)}
+                  autoComplete="username"
+                  placeholder="correo@tlalcani.mx"
+                  required
+                />
+              </div>
+            </label>
+
+            <label>
+              Contraseña
+              <div className="campoLogin">
+                <LockKeyhole size={19} />
+
+                <input
+                  type="password"
+                  value={clave}
+                  onChange={(evento) => setClave(evento.target.value)}
+                  autoComplete="current-password"
+                  placeholder="Ingresa tu contraseña"
+                  required
+                />
+              </div>
+            </label>
+
+            {errorLogin && <div className="loginError">{errorLogin}</div>}
+
+            <button type="submit" className="loginBoton">
+              <span>Iniciar sesión</span>
+              <ArrowRight size={19} />
+            </button>
+
+            <div className="loginPie">
+              <ShieldCheck size={16} />
+              <span>Acceso protegido al centro de monitoreo</span>
+            </div>
+          </form>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <aside className="sidebar">
         <div className="marca">
           <div className="logo">
-            <Leaf size={25} />
+            <img src="/tlalcani-logo.png" alt="TLALCANI" />
           </div>
 
           <div>
-            <strong>Suelo Inteligente</strong>
-            <span>Panel de monitoreo</span>
+            <strong>TLALCANI</strong>
+            <span>Monitoreo agrícola</span>
           </div>
         </div>
 
@@ -265,9 +469,14 @@ export default function App() {
             <strong>
               {apiDisponible ? "API conectada" : "API sin conexión"}
             </strong>
-            <span>Render</span>
+            <span>{ORIGEN_API}</span>
           </div>
         </div>
+
+        <button className="cerrarSesion" onClick={cerrarSesion}>
+          <LogOut size={17} />
+          Cerrar sesión
+        </button>
       </aside>
 
       <main>
@@ -298,7 +507,11 @@ export default function App() {
         </div>
 
         <header>
-          <div>
+          <div className="encabezadoPrincipal">
+            <span className="encabezadoEtiqueta">
+              TLALCANI / OPERACIÓN AGRÍCOLA
+            </span>
+
             <h1>{encabezado.titulo}</h1>
             <p>{encabezado.descripcion}</p>
           </div>
@@ -316,171 +529,506 @@ export default function App() {
               <RefreshCw size={18} />
               Actualizar
             </button>
+
+            <button
+              className="botonIcono cerrarMovil"
+              onClick={cerrarSesion}
+              title="Cerrar sesión"
+            >
+              <LogOut size={20} />
+            </button>
           </div>
         </header>
 
         {cargando ? (
           <div className="mensaje">
-            <RefreshCw className="girando" size={28} />
+            <img
+              className="spinnerPersonalizado"
+              src={spinner}
+              alt="Cargando información"
+            />
             <p>Conectando con la API...</p>
-            <span>Render puede tardar unos segundos en iniciar.</span>
+            <span>
+              {ORIGEN_API === "Render"
+                ? "Render puede tardar unos segundos en iniciar."
+                : "Verificando el servidor local..."}
+            </span>
           </div>
         ) : !ultima ? (
-          <div className="mensaje">
-            <Cloud size={34} />
-            <p>Todavía no existen lecturas</p>
-            <span>Envía una lectura desde la aplicación móvil.</span>
-          </div>
+          <section className="estadoVacio">
+            <div className="estadoVacioVisual">
+              <Radio size={36} />
+            </div>
+
+            <span className="estadoVacioEtiqueta">SIN TELEMETRÍA RECIBIDA</span>
+
+            <h2>Esperando la primera lectura</h2>
+
+            <p className="estadoVacioDescripcion">
+              TLALCANI está listo para recibir y procesar la información enviada
+              desde la aplicación móvil.
+            </p>
+
+            <div className="flujoVacio">
+              <div>
+                <span>
+                  <span className="numeroPaso">1</span>
+                  <Radio size={21} />
+                </span>
+
+                <strong>Sensor</strong>
+                <small>Captura los datos</small>
+              </div>
+
+              <div>
+                <span>
+                  <span className="numeroPaso">2</span>
+                  <RefreshCw size={21} />
+                </span>
+
+                <strong>Aplicación móvil</strong>
+                <small>Sincroniza la lectura</small>
+              </div>
+
+              <div>
+                <span>
+                  <span className="numeroPaso">3</span>
+                  <Database size={21} />
+                </span>
+
+                <strong>TLALCANI</strong>
+                <small>Procesa y analiza</small>
+              </div>
+            </div>
+
+            <div className="estadoVacioNota">
+              <span className={apiDisponible ? "punto conectado" : "punto"} />
+
+              {apiDisponible
+                ? "API disponible. La vista se actualizará automáticamente."
+                : "No se ha podido establecer conexión con la API."}
+            </div>
+          </section>
         ) : (
           <>
             {vista === "dashboard" && (
               <>
-                <section className="resumen">
-                  <Tarjeta
-                    titulo="pH"
-                    valor={ultima.ph}
-                    unidad=""
-                    icono={<FlaskConical />}
-                    color="azul"
-                  />
-
-                  <Tarjeta
-                    titulo="Humedad"
-                    valor={ultima.humedad}
-                    unidad="%"
-                    icono={<Droplets />}
-                    color="celeste"
-                  />
-
-                  <Tarjeta
-                    titulo="Temperatura"
-                    valor={ultima.temperatura}
-                    unidad=" °C"
-                    icono={<Thermometer />}
-                    color="rojo"
-                  />
-
-                  <Tarjeta
-                    titulo="Conductividad"
-                    valor={ultima.conductividad}
-                    unidad=" dS/m"
-                    icono={<Zap />}
-                    color="amarillo"
-                  />
-
-                  <Tarjeta
-                    titulo="ORP"
-                    valor={ultima.orp}
-                    unidad=" mV"
-                    icono={<Activity />}
-                    color="morado"
-                  />
-                </section>
-
-                <section className="panelUltima">
+                {/* ESTADO DE SISTEMA */}
+                <section className="barraEstadoSistema">
                   <div>
-                    <span className="etiqueta">Última lectura recibida</span>
-                    <h2>{ultima.cultivo}</h2>
-                    <p>
-                      Dispositivo: <strong>{ultima.dispositivoId}</strong>
-                    </p>
+                    <img
+                      className="iconoEstadoSistema"
+                      src="/iconos/servicio.png"
+                      alt=""
+                      aria-hidden="true"
+                    />
+
+                    <div>
+                      <small>Servicio de datos</small>
+                      <strong>
+                        {apiDisponible ? "Operativo" : "Sin conexión"}
+                      </strong>
+                    </div>
                   </div>
 
-                  <div className="ultimaDerecha">
-                    <span className={`estado ${ultima.estado}`}>
-                      {textoEstado(ultima.estado)}
-                    </span>
+                  <div>
+                    <img
+                      className="iconoEstadoSistema"
+                      src="/iconos/sensor.png"
+                      alt=""
+                      aria-hidden="true"
+                    />
 
-                    <small>{formatearFecha(ultima.fechaRecepcion)}</small>
+                    <div>
+                      <small>Sensor activo</small>
+                      <strong>{ultima.dispositivoId}</strong>
+                    </div>
+                  </div>
+
+                  <div>
+                    <img
+                      className="iconoEstadoSistema"
+                      src="/iconos/registros.png"
+                      alt=""
+                      aria-hidden="true"
+                    />
+
+                    <div>
+                      <small>Lecturas disponibles</small>
+                      <strong>{lecturas.length} registros</strong>
+                    </div>
+                  </div>
+
+                  <div>
+                    <img
+                      className="iconoEstadoSistema"
+                      src="/iconos/ultimaRecepcion.png"
+                      alt=""
+                      aria-hidden="true"
+                    />
+
+                    <div>
+                      <small>Última recepción</small>
+                      <strong>{formatearFecha(ultima.fechaRecepcion)}</strong>
+                    </div>
                   </div>
                 </section>
 
-                <section className="graficaPanel">
-                  <div className="tituloGrafica">
-                    <div>
-                      <h2>Tendencia de mediciones</h2>
-                      <p>Comportamiento de las últimas lecturas recibidas</p>
+                {/* LECTURA ACTUAL */}
+                <section className="panelLecturaActual">
+                  <div className="lecturaActualPrincipal">
+                    <div className="lecturaActualEncabezado">
+                      <div>
+                        <span className="etiqueta">LECTURA ACTUAL</span>
+                        <h2>{ultima.campoNombre}</h2>
+                        <p>{ultima.campoId}</p>
+                      </div>
+
+                      <span className={`estado ${ultima.estado}`}>
+                        {textoEstado(ultima.estado)}
+                      </span>
                     </div>
 
-                    <span>{lecturas.length} mediciones</span>
+                    <div className="fechaCaptura">
+                      <img
+                        className="iconoLectura"
+                        src="/iconos/reloj.png"
+                        alt=""
+                        aria-hidden="true"
+                      />
+                      <span>
+                        Capturada: {formatearFecha(ultima.fechaCaptura)}
+                      </span>
+                    </div>
+
+                    <div className="metadatosLectura">
+                      <div>
+                        <img
+                          className="iconoLectura"
+                          src="/iconos/campo.png"
+                          alt=""
+                          aria-hidden="true"
+                        />
+                        <span>Campo</span>
+                        <strong>{ultima.campoNombre}</strong>
+                      </div>
+
+                      <div>
+                        <img
+                          className="iconoLectura"
+                          src="/iconos/zona.png"
+                          alt=""
+                          aria-hidden="true"
+                        />
+                        <span>Zona</span>
+                        <strong>{ultima.zona || "Zona no identificada"}</strong>
+                      </div>
+
+                      <div>
+                        <img
+                          className="iconoLectura"
+                          src="/iconos/cultivoL.png"
+                          alt=""
+                          aria-hidden="true"
+                        />
+                        <span>Cultivo</span>
+                        <strong>{ultima.cultivo}</strong>
+                      </div>
+
+                      <div>
+                        <img
+                          className="iconoLectura"
+                          src="/iconos/sensor.png"
+                          alt=""
+                          aria-hidden="true"
+                        />
+                        <span>Dispositivo</span>
+                        <strong>{ultima.dispositivoId}</strong>
+                      </div>
+
+                      <div>
+                        <img
+                          className="iconoLectura"
+                          src="/iconos/origen.png"
+                          alt=""
+                          aria-hidden="true"
+                        />
+                        <span>Origen</span>
+                        <strong>{ultima.origen}</strong>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="grafica">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart
-                        data={datosGrafica}
-                        margin={{ top: 10, right: 20, left: -15, bottom: 0 }}
-                      >
-                        <CartesianGrid
-                          stroke="var(--borde)"
-                          strokeDasharray="4 4"
-                          vertical={false}
-                        />
+                  <div className="saludSuelo">
+                    <span>Índice del suelo</span>
 
-                        <XAxis
-                          dataKey="hora"
-                          stroke="var(--texto-suave)"
-                          tickLine={false}
-                          axisLine={false}
-                          fontSize={12}
-                        />
+                    <div
+                      className="circuloIndiceSuelo"
+                      style={
+                        {
+                          "--progreso": `${puntajeSuelo * 3.6}deg`,
+                        } as CSSProperties
+                      }
+                    >
+                      <img
+                        className="indiceSueloBase"
+                        src={imagenIndice}
+                        alt=""
+                        aria-hidden="true"
+                      />
 
-                        <YAxis
-                          stroke="var(--texto-suave)"
-                          tickLine={false}
-                          axisLine={false}
-                          fontSize={12}
-                        />
+                      <img
+                        className="indiceSueloProgreso"
+                        src={imagenIndice}
+                        alt=""
+                        aria-hidden="true"
+                      />
 
-                        <Tooltip
-                          contentStyle={{
-                            color: "var(--texto)",
-                            background: "var(--panel)",
-                            border: "1px solid var(--borde)",
-                            borderRadius: "12px",
-                            boxShadow: "var(--sombra)",
-                          }}
-                          labelStyle={{
-                            color: "var(--texto-suave)",
-                            marginBottom: "7px",
-                          }}
-                        />
+                      <div className="contenidoIndiceSuelo">
+                        <strong>
+                          {ultimoAnalisis?.puntaje_general ?? "--"}
+                        </strong>
+                        <small>de 100 puntos</small>
+                      </div>
+                    </div>
 
-                        <Legend />
-
-                        <Line
-                          type="monotone"
-                          dataKey="ph"
-                          name="pH"
-                          stroke="#3478F6"
-                          strokeWidth={3}
-                          dot={{ r: 3 }}
-                          activeDot={{ r: 6 }}
-                        />
-
-                        <Line
-                          type="monotone"
-                          dataKey="humedad"
-                          name="Humedad"
-                          stroke="#00ACC1"
-                          strokeWidth={3}
-                          dot={{ r: 3 }}
-                          activeDot={{ r: 6 }}
-                        />
-
-                        <Line
-                          type="monotone"
-                          dataKey="temperatura"
-                          name="Temperatura"
-                          stroke="#E85D3F"
-                          strokeWidth={3}
-                          dot={{ r: 3 }}
-                          activeDot={{ r: 6 }}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
+                    <div className={`nivelSalud ${ultima.estado}`}>
+                      {textoEstado(ultima.estado)}
+                    </div>
                   </div>
                 </section>
+
+                <section className="dashboardColumnas">
+                  <div className="graficaPanel graficaTecnica">
+                    <div className="tituloGrafica">
+                      <div>
+                        <h2>Tendencia de variables</h2>
+                        <p>pH, humedad y temperatura por hora</p>
+                      </div>
+
+                      <span>{lecturas.length} mediciones</span>
+                    </div>
+
+                    <div className="grafica">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart
+                          data={datosGrafica}
+                          margin={{ top: 10, right: 20, left: -15, bottom: 0 }}
+                        >
+                          <CartesianGrid
+                            stroke="var(--borde)"
+                            strokeDasharray="4 4"
+                            vertical={false}
+                          />
+                          <XAxis
+                            dataKey="hora"
+                            stroke="var(--texto-suave)"
+                            tickLine={false}
+                            axisLine={false}
+                            fontSize={12}
+                          />
+                          <YAxis
+                            stroke="var(--texto-suave)"
+                            tickLine={false}
+                            axisLine={false}
+                            fontSize={12}
+                          />
+                          <Tooltip
+                            contentStyle={{
+                              color: "var(--texto)",
+                              background: "var(--panel)",
+                              border: "1px solid var(--borde)",
+                              borderRadius: "12px",
+                              boxShadow: "var(--sombra)",
+                            }}
+                            labelStyle={{
+                              color: "var(--texto-suave)",
+                              marginBottom: "7px",
+                            }}
+                          />
+                          <Legend />
+                          <Line
+                            type="monotone"
+                            dataKey="ph"
+                            name="pH"
+                            stroke="#3478F6"
+                            strokeWidth={3}
+                            dot={{ r: 3 }}
+                            activeDot={{ r: 6 }}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="humedad"
+                            name="Humedad"
+                            stroke="#00ACC1"
+                            strokeWidth={3}
+                            dot={{ r: 3 }}
+                            activeDot={{ r: 6 }}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="temperatura"
+                            name="Temperatura"
+                            stroke="#E85D3F"
+                            strokeWidth={3}
+                            dot={{ r: 3 }}
+                            activeDot={{ r: 6 }}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* #region PANEL ACTIVIDAD RECIENTE */}
+                  {/* <div className="actividadPanel">
+                    <div className="actividadEncabezado">
+                      <div>
+                        <h2>Actividad reciente</h2>
+                        <p>Últimas lecturas sincronizadas</p>
+                      </div>
+                      <History size={21} />
+                    </div>
+
+                    <div className="actividadLista">
+                      {lecturas.slice(0, 5).map((lectura) => (
+                        <div className="actividadItem" key={lectura.lecturaId}>
+                          <span
+                            className={`actividadPunto ${lectura.estado}`}
+                          />
+                          <div>
+                            <strong>{lectura.campoNombre}</strong>
+                            <span>
+                              {lectura.dispositivoId} · {lectura.cultivo}
+                            </span>
+                          </div>
+                          <time>
+                            {new Date(lectura.fechaCaptura).toLocaleTimeString(
+                              "es-MX",
+                              {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              },
+                            )}
+                          </time>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      className="verHistorial"
+                      onClick={() => setVista("historial")}
+                    >
+                      Ver historial completo
+                    </button>
+                  </div> */}
+
+                  <section className="variablesDashboard">
+                    <div className="variablesDashboardEncabezado">
+                      <strong>Variables Medidas</strong>
+                      <span>Últimos valores recibidos</span>
+                    </div>
+
+                    <div className="resumen resumenTecnico">
+                      <Tarjeta
+                        titulo="pH"
+                        valor={ultima.ph}
+                        unidad=""
+                        icono={
+                          <img
+                            className="iconoVariableDashboard"
+                            src="/iconos/ph.png"
+                            alt="pH"
+                          />
+                        }
+                        color="verde"
+                      />
+
+                      <Tarjeta
+                        titulo="Humedad"
+                        valor={ultima.humedad}
+                        unidad="%"
+                        icono={
+                          <img
+                            className="iconoVariableDashboard"
+                            src="/iconos/humedad.png"
+                            alt="Humedad"
+                          />
+                        }
+                        color="celeste"
+                      />
+
+                      <Tarjeta
+                        titulo="Temperatura"
+                        valor={ultima.temperatura}
+                        unidad=" °C"
+                        icono={
+                          <img
+                            className="iconoVariableDashboard"
+                            src="/iconos/temperatura.png"
+                            alt="Temperatura"
+                          />
+                        }
+                        color="naranja"
+                      />
+
+                      <Tarjeta
+                        titulo="Conductividad"
+                        valor={ultima.conductividad}
+                        unidad=" dS/m"
+                        icono={
+                          <img
+                            className="iconoVariableDashboard"
+                            src="/iconos/conductividad.png"
+                            alt="Conductividad"
+                          />
+                        }
+                        color="morado"
+                      />
+
+                      <Tarjeta
+                        titulo="ORP"
+                        valor={ultima.orp}
+                        unidad=" mV"
+                        icono={
+                          <img
+                            className="iconoVariableDashboard"
+                            src="/iconos/orp.png"
+                            alt="ORP"
+                          />
+                        }
+                        color="morado"
+                      />
+                    </div>
+                  </section>
+                </section>
+
+                {/* Diagnóstico más reciente */}
+                {/* {ultimoAnalisis && (
+                  <section
+                    className={`diagnosticoDashboard ${ultimoAnalisis.estado_general}`}
+                  >
+                    {ultimoAnalisis.alertas.length > 0 ? (
+                      <AlertTriangle size={25} />
+                    ) : (
+                      <CheckCircle2 size={25} />
+                    )}
+
+                    <div>
+                      <span>Diagnóstico más reciente</span>
+                      <strong>
+                        {ultimoAnalisis.alertas[0]?.mensaje ??
+                          "Las variables se encuentran dentro de los rangos recomendados."}
+                      </strong>
+                      {ultimoAnalisis.recomendaciones[0] && (
+                        <p>{ultimoAnalisis.recomendaciones[0].descripcion}</p>
+                      )}
+                    </div>
+
+                    <button onClick={() => setVista("analisis")}>
+                      Ver análisis
+                    </button>
+                  </section>
+                )} */}
               </>
             )}
 
@@ -493,10 +1041,31 @@ export default function App() {
                         <span>Puntaje general</span>
 
                         <div
-                          className={`puntajeCirculo ${ultimoAnalisis.estado_general}`}
+                          className="circuloIndiceSuelo circuloIndiceAnalisis"
+                          style={
+                            {
+                              "--progreso": `${puntajeSuelo * 3.6}deg`,
+                            } as CSSProperties
+                          }
                         >
-                          <strong>{ultimoAnalisis.puntaje_general}</strong>
-                          <small>/100</small>
+                          <img
+                            className="indiceSueloBase"
+                            src={imagenIndice}
+                            alt=""
+                            aria-hidden="true"
+                          />
+
+                          <img
+                            className="indiceSueloProgreso"
+                            src={imagenIndice}
+                            alt=""
+                            aria-hidden="true"
+                          />
+
+                          <div className="contenidoIndiceSuelo">
+                            <strong>{ultimoAnalisis.puntaje_general}</strong>
+                            <small>/100</small>
+                          </div>
                         </div>
 
                         <span
@@ -506,54 +1075,82 @@ export default function App() {
                         </span>
                       </div>
 
-                      <div className="detalleAnalisis">
+                      <div className="detalleAnalisis interpretacionInteligente">
                         <div className="encabezadoAnalisis">
                           <div>
-                            <h2>Evaluación de la última lectura</h2>
+                            <span className="etiqueta">ANÁLISIS TLALCANI</span>
+                            <h2>Interpretación inteligente</h2>
                           </div>
 
-                          {ultimoAnalisis.alertas.length === 0 ? (
-                            <CheckCircle2 className="iconoCorrecto" size={30} />
-                          ) : (
-                            <AlertTriangle className="iconoAlerta" size={30} />
-                          )}
+                          <BrainCircuit size={31} />
                         </div>
 
-                        {ultimoAnalisis.alertas.length === 0 ? (
-                          <div className="sinAlertas">
-                            <CheckCircle2 size={20} />
-                            Todas las variables se encuentran dentro de los
-                            rangos recomendados.
+                        {cargandoInterpretacion ? (
+                          <div className="cargandoInterpretacion">
+                            <img src={spinner} alt="" />
+                            <span>
+                              Interpretando las condiciones del suelo...
+                            </span>
                           </div>
-                        ) : (
-                          <div className="listaAlertas">
-                            {ultimoAnalisis.alertas.map((alerta) => (
-                              <div
-                                className={`alertaItem ${alerta.nivel}`}
-                                key={`${alerta.variable}-${alerta.mensaje}`}
-                              >
-                                <AlertTriangle size={18} />
+                        ) : interpretacionIa ? (
+                          <>
+                            <div className="resumenInterpretacion">
+                              <div className="cabeceraPrioridad">
+                                <strong>
+                                  {interpretacionIa.variable_prioritaria}
+                                </strong>
 
-                                <div>
-                                  <strong>{alerta.variable}</strong>
-                                  <p>{alerta.mensaje}</p>
-                                </div>
+                                <span
+                                  className={`prioridadIa ${interpretacionIa.prioridad}`}
+                                >
+                                  Prioridad {interpretacionIa.prioridad}
+                                </span>
                               </div>
-                            ))}
-                          </div>
-                        )}
 
-                        {ultimoAnalisis.recomendaciones[0] && (
-                          <div className="recomendacion">
-                            <Lightbulb size={21} />
+                              <p>{interpretacionIa.resumen}</p>
+                            </div>
+
+                            <div className="accionesIa">
+                              <strong>Acciones sugeridas</strong>
+
+                              {interpretacionIa.acciones.map(
+                                (accion, indice) => (
+                                  <div
+                                    className="accionIa"
+                                    key={`${indice}-${accion}`}
+                                  >
+                                    <CheckCircle2 size={18} />
+                                    <span>{accion}</span>
+                                  </div>
+                                ),
+                              )}
+                            </div>
+
+                            <small className="advertenciaIa">
+                              {interpretacionIa.advertencia}
+                            </small>
+                          </>
+                        ) : (
+                          <div className="interpretacionNoDisponible">
+                            <AlertTriangle size={21} />
 
                             <div>
                               <strong>
-                                {ultimoAnalisis.recomendaciones[0].titulo}
+                                Interpretación inteligente no disponible
                               </strong>
                               <p>
-                                {ultimoAnalisis.recomendaciones[0].descripcion}
+                                Se muestra la recomendación calculada por el
+                                análisis regional.
                               </p>
+
+                              {ultimoAnalisis.recomendaciones[0] && (
+                                <p>
+                                  {
+                                    ultimoAnalisis.recomendaciones[0]
+                                      .descripcion
+                                  }
+                                </p>
+                              )}
                             </div>
                           </div>
                         )}
@@ -570,6 +1167,92 @@ export default function App() {
                         <span>
                           {formatearFecha(ultimoAnalisis.fecha_procesamiento)}
                         </span>
+                      </div>
+
+                      <div className="detalleVariables">
+                        {ultimoAnalisis.resultados.map((resultado) => (
+                          <article
+                            className={`variableAnalisis ${resultado.estado}`}
+                            key={resultado.variable}
+                          >
+                            <div className="variableAnalisisEncabezado">
+                              <div className="variableAnalisisIdentidad">
+                                <img
+                                  className="iconoVariableAnalisis"
+                                  src={
+                                    iconosVariables[
+                                      resultado.variable.toLowerCase()
+                                    ] ?? "/iconos/suelo.png"
+                                  }
+                                  alt={`Icono de ${resultado.nombre}`}
+                                />
+
+                                <div>
+                                  <span>Variable medida</span>
+                                  <h3>{resultado.nombre}</h3>
+                                </div>
+                              </div>
+                              <span className={`estado ${resultado.estado}`}>
+                                {textoEstado(resultado.estado)}
+                              </span>
+                            </div>
+
+                            <div className="variableAnalisisValor">
+                              <strong>{resultado.valor}</strong>
+                              <span>{resultado.unidad}</span>
+                            </div>
+
+                            <div className="rangoVariable">
+                              <div>
+                                <span>Mínimo</span>
+                                <strong>
+                                  {resultado.rango_recomendado.min}{" "}
+                                  {resultado.unidad}
+                                </strong>
+                              </div>
+
+                              <div className="rangoOptimo">
+                                <span>Óptimo</span>
+                                <strong>
+                                  {resultado.rango_recomendado.optimo}{" "}
+                                  {resultado.unidad}
+                                </strong>
+                              </div>
+
+                              <div>
+                                <span>Máximo</span>
+                                <strong>
+                                  {resultado.rango_recomendado.max}{" "}
+                                  {resultado.unidad}
+                                </strong>
+                              </div>
+                            </div>
+
+                            <div
+                              className={`condicionVariable ${resultado.condicion}`}
+                            >
+                              <span>
+                                {resultado.condicion === "bajo"
+                                  ? "Por debajo del rango"
+                                  : resultado.condicion === "alto"
+                                    ? "Por encima del rango"
+                                    : "Dentro del rango"}
+                              </span>
+
+                              <strong>
+                                {resultado.condicion === "bajo"
+                                  ? `Faltan ${resultado.diferencia_para_rango} ${resultado.unidad}`
+                                  : resultado.condicion === "alto"
+                                    ? `Excede ${resultado.diferencia_para_rango} ${resultado.unidad}`
+                                    : "Sin ajuste necesario"}
+                              </strong>
+                            </div>
+
+                            <p className="mensajeVariable">
+                              {resultado.mensaje}
+                            </p>
+                          </article>
+                        ))}
                       </div>
                     </section>
                   </>
@@ -635,12 +1318,14 @@ export default function App() {
                   <table>
                     <thead>
                       <tr>
-                        <th>Fecha</th>
+                        <th>Captura</th>
+                        <th>Campo</th>
+                        <th>Zona</th>
                         <th>Dispositivo</th>
                         <th>Cultivo</th>
                         <th>pH</th>
                         <th>Humedad</th>
-                        <th>Temperatura</th>
+                        <th>Temp</th>
                         <th>Conductividad</th>
                         <th>ORP</th>
                         <th>Estado</th>
@@ -650,7 +1335,9 @@ export default function App() {
                     <tbody>
                       {lecturasFiltradas.map((lectura) => (
                         <tr key={lectura.lecturaId}>
-                          <td>{formatearFecha(lectura.fechaRecepcion)}</td>
+                          <td>{formatearFecha(lectura.fechaCaptura)}</td>
+                          <td>{lectura.campoNombre}</td>
+                          <td>{lectura.zona || "Zona no identificada"}</td>
                           <td>{lectura.dispositivoId}</td>
                           <td>{lectura.cultivo}</td>
                           <td>{lectura.ph}</td>
@@ -668,7 +1355,7 @@ export default function App() {
 
                       {lecturasFiltradas.length === 0 && (
                         <tr>
-                          <td className="sinResultados" colSpan={9}>
+                          <td className="sinResultados" colSpan={11}>
                             No existen lecturas que coincidan con los filtros.
                           </td>
                         </tr>
@@ -682,7 +1369,11 @@ export default function App() {
                     <article className="lecturaMovil" key={lectura.lecturaId}>
                       <div className="lecturaMovilEncabezado">
                         <div>
-                          <strong>{lectura.cultivo}</strong>
+                          <strong>{lectura.campoNombre}</strong>
+                          <span>
+                            {lectura.zona || "Zona no identificada"} ·{" "}
+                            {lectura.cultivo}
+                          </span>
                           <span>{lectura.dispositivoId}</span>
                         </div>
 
@@ -692,7 +1383,7 @@ export default function App() {
                       </div>
 
                       <div className="lecturaMovilFecha">
-                        {formatearFecha(lectura.fechaRecepcion)}
+                        Capturada: {formatearFecha(lectura.fechaCaptura)}
                       </div>
 
                       <div className="lecturaMovilDatos">
