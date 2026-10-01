@@ -1,75 +1,129 @@
-# React + TypeScript + Vite
+# TLALCANI — Aplicación web
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Panel web desarrollado con React, TypeScript y Vite para consultar las lecturas y análisis de suelo procesados por la API de TLALCANI.
 
-Currently, two official plugins are available:
+## Funcionalidades
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Inicio de sesión.
+- Dashboard general.
+- Estado de conexión con la API.
+- Visualización de la última lectura.
+- Índice general del suelo.
+- Detalle de variables.
+- Historial de lecturas.
+- Búsqueda y filtros.
+- Diseño adaptable para computadora y dispositivos móviles.
+- Interpretación generada mediante inteligencia artificial.
+- Tema claro y oscuro.
 
-## React Compiler
+## Tecnologías
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- React
+- TypeScript
+- Vite
+- Recharts
+- Lucide React
 
-## Expanding the ESLint configuration
+## Requisitos
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- Node.js 22 o compatible.
+- npm.
+- Acceso a la API de TLALCANI.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## Instalación
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
+## Variables de entorno
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Crear un archivo `.env` en la carpeta principal:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```env
+VITE_API_URL=https://api-suelo-inteligente.onrender.com
+VITE_API_ORIGEN=Render
 ```
+
+| Variable | Descripción |
+|---|---|
+| `VITE_API_URL` | Dirección de la API utilizada por la aplicación web. |
+| `VITE_API_ORIGEN` | Identifica el origen de la información mostrada. |
+
+Para trabajar con la API local:
+
+```env
+VITE_API_URL=http://localhost:5025
+VITE_API_ORIGEN=Local
+```
+
+## Ejecución local
+
+```bash
+npm run dev
+```
+
+La aplicación estará disponible normalmente en:
+
+```text
+http://localhost:5173
+```
+
+## Credenciales de demostración
+
+```text
+Correo: admin@tlalcani.mx
+Contraseña: admin123
+```
+
+## Compilación
+
+```bash
+npm run build
+```
+
+Los archivos generados se guardarán en:
+
+```text
+dist/
+```
+
+Para probar la compilación:
+
+```bash
+npm run preview
+```
+
+## Configuración en Render
+
+```text
+Build Command: npm install && npm run build
+Publish Directory: dist
+```
+
+Variables necesarias:
+
+```env
+VITE_API_URL=https://api-suelo-inteligente.onrender.com
+VITE_API_ORIGEN=Render
+```
+
+> Después de modificar una variable `VITE_*`, es necesario realizar un nuevo despliegue.
+
+## Flujo de información
+
+1. La aplicación móvil registra una lectura.
+2. La lectura se envía a la API.
+3. La API procesa la información.
+4. La aplicación web consulta las lecturas y análisis.
+5. El dashboard muestra los datos recibidos.
+6. La sección de análisis solicita la interpretación inteligente.
+7. El historial permite cotejar las mediciones registradas.
+
+## Consideraciones
+
+- La aplicación web no procesa directamente las lecturas.
+- Las reglas de análisis se encuentran en la API.
+- Render puede tardar algunos segundos en activar el servicio.
+- Las variables `VITE_*` son visibles desde el navegador.
+- Nunca se debe colocar la clave de Groq en la aplicación web.
